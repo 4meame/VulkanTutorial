@@ -8,7 +8,7 @@ use debug::ValidationInfo;
 use structures::QueueFamilyIndices;
 use winit::event::{Event, VirtualKeyCode, ElementState, KeyboardInput, WindowEvent};
 use winit::event_loop::{EventLoop, ControlFlow};
-use std::ffi::{CString, c_void};
+use std::ffi::{CString, c_void, c_char};
 use std::ptr;
 
 const WINDOW_TITLE: &'static str = "Vulkan Renderer By Rust";
@@ -25,7 +25,9 @@ struct VulkanApplication {
     instance: Instance,
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_messenger: vk::DebugUtilsMessengerEXT,
-    physical_device: vk::PhysicalDevice
+    physical_device: vk::PhysicalDevice,
+    logical_device: ash::Device,
+    graphics_queue: vk::Queue
 }
 
 impl VulkanApplication {
@@ -34,12 +36,15 @@ impl VulkanApplication {
         let instance = Self::create_instance(&entry);
         let (debug_utils_loader, debug_messenger) = debug::setup_debug_utils(VALIDATION.is_enable, &entry, &instance);
         let physical_device = VulkanApplication::pick_physical_device(&instance);
+        let (logical_device, graphics_queue) = VulkanApplication::create_logical_device(&instance, physical_device, &VALIDATION);
         VulkanApplication {
             entry,
             instance,
             debug_utils_loader,
             debug_messenger,
-            physical_device
+            physical_device,
+            logical_device,
+            graphics_queue
         }
     }
 
@@ -213,7 +218,7 @@ impl VulkanApplication {
             }
         );
 
-        let indices = VulkanApplication::find_queue_family(&instance, physical_device);
+        let indices: QueueFamilyIndices = VulkanApplication::find_queue_family(&instance, physical_device);
         return indices.is_complete();
     }
 
@@ -240,6 +245,66 @@ impl VulkanApplication {
         }
 
         queue_family_indices
+    }
+
+    fn create_logical_device(instance: &Instance, physical_device: vk::PhysicalDevice, validation: &ValidationInfo) -> (ash::Device, vk::Queue) {
+        let indices = VulkanApplication::find_queue_family(instance, physical_device);
+        // right now we are only interested in graphics queue
+        let queue_priorities = [1.0_f32];
+        let queue_create_info = vk::DeviceQueueCreateInfo {
+            s_type: vk::StructureType::DEVICE_QUEUE_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::DeviceQueueCreateFlags::empty(),
+            queue_family_index: indices.graphics_family.unwrap(),
+            p_queue_priorities: queue_priorities.as_ptr(),
+            queue_count: queue_priorities.len() as u32
+        };
+
+        let physical_device_features = vk::PhysicalDeviceFeatures {
+            // default no feature
+            ..Default::default()
+        };
+        let required_validation_layer_raw_names: Vec<CString> = validation
+            .required_validation_layers
+            .iter()
+            .map(|layer_name| CString::new(*layer_name).unwrap())
+            .collect();
+        let enabled_layer_names: Vec<*const c_char> = required_validation_layer_raw_names
+            .iter()
+            .map(|layer_name| layer_name.as_ptr())
+            .collect();
+
+        let device_create_info = vk::DeviceCreateInfo {
+            s_type: vk::StructureType::DEVICE_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::DeviceCreateFlags::empty(),
+            queue_create_info_count: 1,
+            p_queue_create_infos: &queue_create_info,
+            enabled_layer_count: if validation.is_enable {
+                enabled_layer_names.len()
+            } else {
+                0
+            } as u32,
+            pp_enabled_extension_names: if validation.is_enable {
+                enabled_layer_names.as_ptr()
+            } else {
+                ptr::null()
+            },
+            enabled_extension_count: 0,
+            pp_enabled_layer_names: ptr::null(),
+            p_enabled_features: & physical_device_features
+        };
+
+        let device = unsafe {
+            instance
+                .create_device(physical_device, &device_create_info, None)
+                .expect("Failed to create Logical Device!")
+        };
+        let graphics_queue = unsafe {
+            device.get_device_queue(indices.graphics_family.unwrap(), 0)
+        };
+
+        (device, graphics_queue)
     }
 
     fn draw_frame(&mut self) {
@@ -283,13 +348,16 @@ impl VulkanApplication {
     }
 }
 
-//clean up, order is opposite with init
+// clean up, order is opposite with init
 impl Drop for VulkanApplication {
     fn drop(&mut self) {
         unsafe{
+            self.logical_device.destroy_device(None);
+
             if VALIDATION.is_enable {
                 self.debug_utils_loader.destroy_debug_utils_messenger(self.debug_messenger, None);
             }
+
             self.instance.destroy_instance(None);
         }
     }
