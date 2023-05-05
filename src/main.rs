@@ -257,7 +257,7 @@ impl VulkanApplication {
             flags: vk::DeviceQueueCreateFlags::empty(),
             queue_family_index: indices.graphics_family.unwrap(),
             p_queue_priorities: queue_priorities.as_ptr(),
-            queue_count: queue_priorities.len() as u32
+            queue_count: queue_priorities.len() as u32,
         };
 
         let physical_device_features = vk::PhysicalDeviceFeatures {
@@ -285,14 +285,14 @@ impl VulkanApplication {
             } else {
                 0
             } as u32,
-            pp_enabled_extension_names: if validation.is_enable {
+            pp_enabled_layer_names: if validation.is_enable {
                 enabled_layer_names.as_ptr()
             } else {
                 ptr::null()
             },
             enabled_extension_count: 0,
-            pp_enabled_layer_names: ptr::null(),
-            p_enabled_features: & physical_device_features
+            pp_enabled_extension_names: ptr::null(),
+            p_enabled_features: &physical_device_features,
         };
 
         let device = unsafe {
@@ -301,7 +301,8 @@ impl VulkanApplication {
                 .expect("Failed to create Logical Device!")
         };
         let graphics_queue = unsafe {
-            device.get_device_queue(indices.graphics_family.unwrap(), 0)
+            device
+                .get_device_queue(indices.graphics_family.unwrap(), 0)
         };
 
         (device, graphics_queue)
