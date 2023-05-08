@@ -1,9 +1,24 @@
+use ash::vk;
+
 pub struct QueueFamilyIndices {
-    pub graphics_family: Option<u32>
+    pub graphics_family: Option<u32>,
+    pub present_family: Option<u32>
 }
 
 impl QueueFamilyIndices {
-    pub fn is_complete(&self) -> bool {
-        self.graphics_family.is_some()
+    pub fn new() -> QueueFamilyIndices {
+        QueueFamilyIndices { 
+            graphics_family: None, 
+            present_family: None 
+        }
     }
+
+    pub fn is_complete(&self) -> bool {
+        self.graphics_family.is_some() && self.present_family.is_some()
+    }
+}
+
+pub struct SurfaceStuff {
+    pub surface_loader: ash::extensions::khr::Surface,
+    pub surface: vk::SurfaceKHR
 }
