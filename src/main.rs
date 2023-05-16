@@ -2,7 +2,7 @@ mod platform;
 mod debug;
 mod tools;
 mod structures;
-use ash::vk;
+use ash::{vk, Device};
 use ash::{Entry, Instance};
 use debug::ValidationInfo;
 use structures::{QueueFamilyIndices, SurfaceStuff, DeviceExtension, SwapchainStuff, SwapchainSupportDetail};
@@ -59,7 +59,7 @@ impl VulkanApplication {
             logical_device
                 .get_device_queue(queue_family_indices.present_family.unwrap(), 0)
         };
-        let swapchain_stuff = VulkanApplication::create_swapchain(&instance, &logical_device, physical_device, &surface_stuff, queue_family_indices);
+        let swapchain_stuff = VulkanApplication::create_swapchain(&instance, &logical_device, physical_device, &surface_stuff, &queue_family_indices);
 
         VulkanApplication {
             entry,
@@ -312,7 +312,7 @@ impl VulkanApplication {
         queue_family_indices
     }
 
-    fn create_logical_device(instance: &Instance, surface_stuff: &SurfaceStuff, physical_device: vk::PhysicalDevice, validation: &ValidationInfo) -> (ash::Device, QueueFamilyIndices) {
+    fn create_logical_device(instance: &Instance, surface_stuff: &SurfaceStuff, physical_device: vk::PhysicalDevice, validation: &ValidationInfo) -> (Device, QueueFamilyIndices) {
         let indices = VulkanApplication::find_queue_family(instance, &surface_stuff, physical_device);
         // right now we are only interested in graphics queue
         let queue_priorities = [1.0_f32];
@@ -419,7 +419,7 @@ impl VulkanApplication {
         }
     }
 
-    fn create_swapchain(instance: &Instance, device: &ash::Device, physical_device: vk::PhysicalDevice, surface_stuff: &SurfaceStuff, queue_family_indices: QueueFamilyIndices) -> SwapchainStuff {
+    fn create_swapchain(instance: &Instance, device: &Device, physical_device: vk::PhysicalDevice, surface_stuff: &SurfaceStuff, queue_family_indices: &QueueFamilyIndices) -> SwapchainStuff {
         let swapchain_support = VulkanApplication::find_swapchain_support(physical_device, surface_stuff);
         let surface_format = VulkanApplication::choose_swapchain_format(&swapchain_support.formats);
         let present_mode = VulkanApplication::choose_swapchain_present_mode(&swapchain_support.present_modes);
@@ -585,5 +585,5 @@ fn main() {
     let window = VulkanApplication::init_window(&event_loop);
     let vulkan_app = VulkanApplication::new(&window);
 
-    VulkanApplication::main_loop(vulkan_app,event_loop,window);
+    VulkanApplication::main_loop(vulkan_app, event_loop, window);
 }
