@@ -9,7 +9,8 @@ use structures::{QueueFamilyIndices, SurfaceStuff, DeviceExtension, SwapchainStu
 use winit::event::{Event, VirtualKeyCode, ElementState, KeyboardInput, WindowEvent};
 use winit::event_loop::{EventLoop, ControlFlow};
 use std::collections::HashSet;
-use std::ffi::{CString, c_void, c_char};
+use std::os::raw::{c_char, c_void};
+use std::ffi::{CString};
 use std::ptr;
 
 const WINDOW_TITLE: &'static str = "Vulkan Renderer By Rust";
@@ -50,7 +51,7 @@ impl VulkanApplication {
         let (debug_utils_loader, debug_messenger) = debug::setup_debug_utils(VALIDATION.is_enable, &entry, &instance);
         let surface_stuff = VulkanApplication::create_surface(&entry, &instance, window);
         let physical_device = VulkanApplication::pick_physical_device(&instance, &surface_stuff);
-        let (logical_device, queue_family_indices) = VulkanApplication::create_logical_device(&instance, &surface_stuff, physical_device, &VALIDATION);
+        let (logical_device, queue_family_indices) = VulkanApplication::create_logical_device(&instance, physical_device, &surface_stuff, &VALIDATION);
         let graphics_queue = unsafe {
             logical_device
                 .get_device_queue(queue_family_indices.graphics_family.unwrap(), 0)
@@ -59,6 +60,7 @@ impl VulkanApplication {
             logical_device
                 .get_device_queue(queue_family_indices.present_family.unwrap(), 0)
         };
+
         let swapchain_stuff = VulkanApplication::create_swapchain(&instance, &logical_device, physical_device, &surface_stuff, &queue_family_indices);
 
         VulkanApplication {
@@ -306,13 +308,13 @@ impl VulkanApplication {
                 break;
             }
 
-            index += 1;
+            index += 1; 
         }
 
         queue_family_indices
     }
 
-    fn create_logical_device(instance: &Instance, surface_stuff: &SurfaceStuff, physical_device: vk::PhysicalDevice, validation: &ValidationInfo) -> (Device, QueueFamilyIndices) {
+    fn create_logical_device(instance: &Instance, physical_device: vk::PhysicalDevice, surface_stuff: &SurfaceStuff, validation: &ValidationInfo) -> (Device, QueueFamilyIndices) {
         let indices = VulkanApplication::find_queue_family(instance, &surface_stuff, physical_device);
         // right now we are only interested in graphics queue
         let queue_priorities = [1.0_f32];
@@ -339,6 +341,11 @@ impl VulkanApplication {
             .map(|layer_name| layer_name.as_ptr())
             .collect();
 
+        // currently just enable the Swapchain extension.
+        let enable_extension_names = [
+            ash::extensions::khr::Swapchain::name().as_ptr(),
+        ];
+
         let device_create_info = vk::DeviceCreateInfo {
             s_type: vk::StructureType::DEVICE_CREATE_INFO,
             p_next: ptr::null(),
@@ -355,8 +362,8 @@ impl VulkanApplication {
             } else {
                 ptr::null()
             },
-            enabled_extension_count: 0,
-            pp_enabled_extension_names: ptr::null(),
+            enabled_extension_count: enable_extension_names.len() as u32,
+            pp_enabled_extension_names: enable_extension_names.as_ptr(),
             p_enabled_features: &physical_device_features,
         };
 
@@ -461,7 +468,7 @@ impl VulkanApplication {
             composite_alpha: vk::CompositeAlphaFlagsKHR::OPAQUE,
             present_mode,
             clipped: vk::TRUE,
-            old_swapchain: vk::SwapchainKHR::null()
+            old_swapchain: vk::SwapchainKHR::null(),
         };
 
         let swapchain_loader = ash::extensions::khr::Swapchain::new(instance, device);
