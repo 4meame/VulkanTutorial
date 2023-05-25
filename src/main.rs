@@ -28,20 +28,27 @@ const DEVICE_EXTENSIONS: DeviceExtension = DeviceExtension {
 
 struct VulkanApplication {
     entry: Entry,
+    // root: represent a vulkan api global context
     instance: Instance,
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_messenger: vk::DebugUtilsMessengerEXT,
     surface_loader: ash::extensions::khr::Surface,
     surface: vk::SurfaceKHR,
+    // handle of reference to the actual GPU
     physical_device: vk::PhysicalDevice,
+    // actual driver on the GPU
     logical_device: ash::Device,
     graphics_queue: vk::Queue,
     present_queue: vk::Queue,
     swapchain_loader: ash::extensions::khr::Swapchain,
+    // perform rendering into the screen
     swapchain: vk::SwapchainKHR,
+    // actual image object
     swapchain_images: Vec<vk::Image>,
     swapchain_format: vk::Format,
-    swapchain_extent: vk::Extent2D
+    swapchain_extent: vk::Extent2D,
+    // wrapper for image
+    swapchain_imageviews: Vec<vk::ImageView>
 }
 
 impl VulkanApplication {
@@ -62,7 +69,7 @@ impl VulkanApplication {
         };
 
         let swapchain_stuff = VulkanApplication::create_swapchain(&instance, &logical_device, physical_device, &surface_stuff, &queue_family_indices);
-
+        let swapchain_imageviews = VulkanApplication::create_swapchain_imageviews(&logical_device, &swapchain_stuff.swapchain_images, swapchain_stuff.swapchain_format);
         VulkanApplication {
             entry,
             instance,
@@ -78,7 +85,8 @@ impl VulkanApplication {
             swapchain: swapchain_stuff.swapchain,
             swapchain_images: swapchain_stuff.swapchain_images,
             swapchain_format: swapchain_stuff.swapchain_format,
-            swapchain_extent: swapchain_stuff.swapchain_extent
+            swapchain_extent: swapchain_stuff.swapchain_extent,
+            swapchain_imageviews
         }
     }
 
@@ -308,7 +316,7 @@ impl VulkanApplication {
                 break;
             }
 
-            index += 1; 
+            index += 1;
         }
 
         queue_family_indices
@@ -527,6 +535,40 @@ impl VulkanApplication {
         }
     }
 
+    fn create_swapchain_imageviews(device: &Device, swapchain_images: &Vec<vk::Image>, swapchain_format: vk::Format) -> Vec<vk::ImageView> {
+        let mut swapchain_imageviews = vec![];
+        for swapchain_image in swapchain_images.into_iter() {
+            let imageview_create_info = vk::ImageViewCreateInfo {
+                s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
+                p_next: ptr::null(),
+                flags: vk::ImageViewCreateFlags::empty(),
+                image: *swapchain_image,
+                view_type: vk::ImageViewType::TYPE_2D,
+                format: swapchain_format,
+                components: vk::ComponentMapping {
+                    r: vk::ComponentSwizzle::IDENTITY,
+                    g: vk::ComponentSwizzle::IDENTITY,
+                    b: vk::ComponentSwizzle::IDENTITY,
+                    a: vk::ComponentSwizzle::IDENTITY,
+                },
+                subresource_range: vk::ImageSubresourceRange {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    base_mip_level: 0,
+                    level_count: 1,
+                    base_array_layer: 0,
+                    layer_count: 1
+                },
+            };
+            let swapchain_imageview = unsafe {
+                device
+                    .create_image_view(&imageview_create_info, None)
+                    .expect("Failed to create Imageview !")
+            };
+            swapchain_imageviews.push(swapchain_imageview);
+        }
+        swapchain_imageviews
+    }
+
     fn draw_frame(&mut self) {
 
     }
@@ -572,6 +614,10 @@ impl VulkanApplication {
 impl Drop for VulkanApplication {
     fn drop(&mut self) {
         unsafe{
+            for imageview in self.swapchain_imageviews.iter() {
+                self.logical_device.destroy_image_view(*imageview, None);
+            }
+
             self.swapchain_loader.destroy_swapchain(self.swapchain, None);
 
             self.logical_device.destroy_device(None);
