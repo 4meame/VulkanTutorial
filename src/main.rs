@@ -11,6 +11,7 @@ use winit::event_loop::{EventLoop, ControlFlow};
 use std::collections::HashSet;
 use std::os::raw::{c_char, c_void};
 use std::ffi::{CString};
+use std::path::Path;
 use std::ptr;
 
 const WINDOW_TITLE: &'static str = "Vulkan Renderer By Rust";
@@ -562,11 +563,73 @@ impl VulkanApplication {
             let swapchain_imageview = unsafe {
                 device
                     .create_image_view(&imageview_create_info, None)
-                    .expect("Failed to create Imageview !")
+                    .expect("Failed to create Imageview!")
             };
             swapchain_imageviews.push(swapchain_imageview);
         }
         swapchain_imageviews
+    }
+
+    fn create_pipeline(device: &Device) {
+        let vert_shader_code = VulkanApplication::read_shader_code(Path::new("shaders/spv/vert.spv"));
+        let frag_shader_code = VulkanApplication::read_shader_code(Path::new("shaders/spv/frag.spv"));
+        let vert_shader_module = VulkanApplication::create_shader_module(device, vert_shader_code);
+        let frag_shader_module = VulkanApplication::create_shader_module(device, frag_shader_code);
+        let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
+
+        let shader_stages = [
+            vk::PipelineShaderStageCreateInfo {
+                s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+                p_next: ptr::null(),
+                flags: vk::PipelineShaderStageCreateFlags::empty(),
+                module: vert_shader_module,
+                p_name: main_function_name.as_ptr(),
+                p_specialization_info: ptr::null(),
+                stage: vk::ShaderStageFlags::VERTEX
+            },
+
+            vk::PipelineShaderStageCreateInfo {
+                s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+                p_next: ptr::null(),
+                flags: vk::PipelineShaderStageCreateFlags::empty(),
+                module: frag_shader_module,
+                p_name: main_function_name.as_ptr(),
+                p_specialization_info: ptr::null(),
+                stage: vk::ShaderStageFlags::FRAGMENT
+            }
+        ];
+
+        unsafe {
+            device.destroy_shader_module(vert_shader_module, None);
+            device.destroy_shader_module(frag_shader_module, None);
+        }
+    }
+
+    fn create_shader_module(device: &Device, code: Vec<u8>) -> vk::ShaderModule {
+        let shader_module_create_info = vk::ShaderModuleCreateInfo {
+            s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::ShaderModuleCreateFlags::empty(),
+            code_size: code.len(),
+            p_code: code.as_ptr() as *const u32
+        };
+
+        unsafe {
+            device
+                .create_shader_module(&shader_module_create_info, None)
+                .expect("Failed to create Shader Module!")
+        }
+    }
+
+    fn read_shader_code(shader_path: &Path) -> Vec<u8> {
+        use std::fs::File;
+        use std::io::Read;
+
+        let spv_file = File::open(shader_path)
+            .expect(&format!("Failed to find spv file at {:?}", shader_path));
+        let bytes_code: Vec<u8> = spv_file.bytes().filter_map(|byte| byte.ok()).collect();
+
+        bytes_code
     }
 
     fn draw_frame(&mut self) {
