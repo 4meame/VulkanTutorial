@@ -570,14 +570,14 @@ impl VulkanApplication {
         swapchain_imageviews
     }
 
-    fn create_pipeline(device: &Device) {
+    fn create_pipeline(device: &Device, swapchain_extent: vk::Extent2D) -> vk::PipelineLayout {
         let vert_shader_code = VulkanApplication::read_shader_code(Path::new("shaders/spv/vert.spv"));
         let frag_shader_code = VulkanApplication::read_shader_code(Path::new("shaders/spv/frag.spv"));
         let vert_shader_module = VulkanApplication::create_shader_module(device, vert_shader_code);
         let frag_shader_module = VulkanApplication::create_shader_module(device, frag_shader_code);
         let main_function_name = CString::new("main").unwrap(); // the beginning function name in shader code.
 
-        let shader_stages = [
+        let shader_stages_create_info = [
             vk::PipelineShaderStageCreateInfo {
                 s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
                 p_next: ptr::null(),
@@ -599,10 +599,123 @@ impl VulkanApplication {
             }
         ];
 
+        let vertex_input_state_create_info = vk::PipelineVertexInputStateCreateInfo {
+            s_type: vk::StructureType::PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::PipelineVertexInputStateCreateFlags::empty(),
+            vertex_binding_description_count: 0,
+            p_vertex_binding_descriptions: ptr::null(),
+            vertex_attribute_description_count: 0,
+            p_vertex_attribute_descriptions: ptr::null()
+        };
+
+        let vertex_input_assembly_state_create_info = vk::PipelineInputAssemblyStateCreateInfo {
+            s_type: vk::StructureType::PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::PipelineInputAssemblyStateCreateFlags::empty(),
+            primitive_restart_enable: vk::FALSE,
+            topology: vk::PrimitiveTopology::TRIANGLE_LIST
+
+        };
+
+        let viewports = [vk::Viewport {
+            x: 0.0,
+            y: 0.0,
+            width: swapchain_extent.width as f32,
+            height: swapchain_extent.height as f32,
+            min_depth: 0.0,
+            max_depth: 1.0
+        }];
+
+        let scissors = [vk::Rect2D {
+            offset: vk::Offset2D {x: 0, y: 0},
+            extent:swapchain_extent
+        }];
+
+        let viewport_state_create_info = vk::PipelineViewportStateCreateInfo {
+            s_type: vk::StructureType::PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::PipelineViewportStateCreateFlags::empty(),
+            scissor_count: scissors.len() as u32,
+            p_scissors: scissors.as_ptr(),
+            viewport_count: viewports.len() as u32,
+            p_viewports: viewports.as_ptr()
+        };
+
+        let rasterization_state_create_info = vk::PipelineRasterizationStateCreateInfo {
+            s_type: vk::StructureType::PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::PipelineRasterizationStateCreateFlags::empty(),
+            depth_clamp_enable: vk::FALSE,
+            rasterizer_discard_enable: vk::FALSE,
+            polygon_mode: vk::PolygonMode::FILL,
+            cull_mode: vk::CullModeFlags::BACK,
+            front_face: vk::FrontFace::CLOCKWISE,
+            depth_bias_enable: vk::FALSE,
+            depth_bias_constant_factor: 0.0,
+            depth_bias_clamp: 0.0,
+            depth_bias_slope_factor: 0.0,
+            line_width: 1.0
+        };
+
+        let multisample_state_create_info = vk::PipelineMultisampleStateCreateInfo {
+            s_type: vk::StructureType::PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::PipelineMultisampleStateCreateFlags::empty(),
+            rasterization_samples: vk::SampleCountFlags::TYPE_1,
+            sample_shading_enable: vk::FALSE,
+            min_sample_shading: 0.0,
+            p_sample_mask: ptr::null(),
+            alpha_to_coverage_enable: vk::FALSE,
+            alpha_to_one_enable: vk::FALSE
+        };
+
+        let color_blend_attachment_state = [vk::PipelineColorBlendAttachmentState {
+            blend_enable: vk::FALSE,
+            color_write_mask: vk::ColorComponentFlags::RGBA,
+            src_color_blend_factor: vk::BlendFactor::ONE,
+            dst_color_blend_factor: vk::BlendFactor::ZERO,
+            color_blend_op: vk::BlendOp::ADD,
+            src_alpha_blend_factor: vk::BlendFactor::ONE,
+            dst_alpha_blend_factor: vk::BlendFactor::ZERO,
+            alpha_blend_op: vk::BlendOp::ADD,
+        }];
+
+        let color_blend_state_create_info = vk::PipelineColorBlendStateCreateInfo {
+            s_type: vk::StructureType::PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::PipelineColorBlendStateCreateFlags::empty(),
+            logic_op_enable: vk::FALSE,
+            logic_op: vk::LogicOp::COPY,
+            attachment_count: color_blend_attachment_state.len() as u32,
+            p_attachments: color_blend_attachment_state.as_ptr(),
+            blend_constants: [0.0, 0.0, 0.0, 0.0]
+        };
+
+        //ignore dynamic state for now
+
+        let pipeline_layout_create_info = vk::PipelineLayoutCreateInfo {
+            s_type: vk::StructureType::PIPELINE_LAYOUT_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::PipelineLayoutCreateFlags::empty(),
+            set_layout_count: 0,
+            p_set_layouts: ptr::null(),
+            push_constant_range_count: 0,
+            p_push_constant_ranges: ptr::null()
+        };
+
+        let pipeline_layout = unsafe {
+            device
+                .create_pipeline_layout(&pipeline_layout_create_info, None)
+                .expect("Failed to create pipeline layout!")
+        };
+
         unsafe {
             device.destroy_shader_module(vert_shader_module, None);
             device.destroy_shader_module(frag_shader_module, None);
         }
+
+        pipeline_layout
     }
 
     fn create_shader_module(device: &Device, code: Vec<u8>) -> vk::ShaderModule {
