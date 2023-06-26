@@ -49,7 +49,10 @@ struct VulkanApplication {
     swapchain_format: vk::Format,
     swapchain_extent: vk::Extent2D,
     // wrapper for image
-    swapchain_imageviews: Vec<vk::ImageView>
+    swapchain_imageviews: Vec<vk::ImageView>,
+
+    render_pass: vk::RenderPass,
+    pipeline_layout: vk::PipelineLayout
 }
 
 impl VulkanApplication {
@@ -68,9 +71,13 @@ impl VulkanApplication {
             logical_device
                 .get_device_queue(queue_family_indices.present_family.unwrap(), 0)
         };
-
+        
         let swapchain_stuff = VulkanApplication::create_swapchain(&instance, &logical_device, physical_device, &surface_stuff, &queue_family_indices);
         let swapchain_imageviews = VulkanApplication::create_swapchain_imageviews(&logical_device, &swapchain_stuff.swapchain_images, swapchain_stuff.swapchain_format);
+
+        let render_pass = VulkanApplication::create_render_pass(&logical_device, swapchain_stuff.swapchain_format);
+        let pipeline_layout = VulkanApplication::create_pipeline(&logical_device, swapchain_stuff.swapchain_extent);
+
         VulkanApplication {
             entry,
             instance,
@@ -87,7 +94,9 @@ impl VulkanApplication {
             swapchain_images: swapchain_stuff.swapchain_images,
             swapchain_format: swapchain_stuff.swapchain_format,
             swapchain_extent: swapchain_stuff.swapchain_extent,
-            swapchain_imageviews
+            swapchain_imageviews,
+            render_pass,
+            pipeline_layout
         }
     }
 
@@ -570,6 +579,58 @@ impl VulkanApplication {
         swapchain_imageviews
     }
 
+    fn create_render_pass(device: &Device, swapchain_format: vk::Format) -> vk::RenderPass {
+        let color_attachment = vk::AttachmentDescription {
+            flags: vk::AttachmentDescriptionFlags::empty(),
+            format: swapchain_format,
+            samples: vk::SampleCountFlags::TYPE_1,
+            load_op: vk::AttachmentLoadOp::CLEAR,
+            store_op: vk::AttachmentStoreOp::STORE,
+            stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+            stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+            initial_layout: vk::ImageLayout::UNDEFINED,
+            final_layout: vk::ImageLayout::PRESENT_SRC_KHR
+        };
+
+        let color_attachment_ref = vk::AttachmentReference {
+            attachment: 0,
+            layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL
+        };
+
+        let subpass = vk::SubpassDescription {
+            flags: vk::SubpassDescriptionFlags::empty(),
+            pipeline_bind_point: vk::PipelineBindPoint::GRAPHICS,
+            input_attachment_count: 0,
+            p_input_attachments: ptr::null(),
+            color_attachment_count: 1,
+            p_color_attachments: &color_attachment_ref,
+            p_resolve_attachments: ptr::null(),
+            p_depth_stencil_attachment: ptr::null(),
+            preserve_attachment_count: 0,
+            p_preserve_attachments: ptr::null()
+        };
+
+        let render_pass_attachments = [color_attachment];
+
+        let render_pass_create_info = vk::RenderPassCreateInfo {
+            s_type: vk::StructureType::RENDER_PASS_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::RenderPassCreateFlags::empty(),
+            attachment_count: render_pass_attachments.len() as u32,
+            p_attachments: render_pass_attachments.as_ptr(),
+            subpass_count: 1,
+            p_subpasses: &subpass,
+            dependency_count: 0,
+            p_dependencies: ptr::null()
+        };
+
+        unsafe {
+            device
+                .create_render_pass(&render_pass_create_info, None)
+                .expect("Failed to create Render Pass!")
+        }
+    }
+
     fn create_pipeline(device: &Device, swapchain_extent: vk::Extent2D) -> vk::PipelineLayout {
         let vert_shader_code = VulkanApplication::read_shader_code(Path::new("shaders/spv/vert.spv"));
         let frag_shader_code = VulkanApplication::read_shader_code(Path::new("shaders/spv/frag.spv"));
@@ -790,6 +851,10 @@ impl VulkanApplication {
 impl Drop for VulkanApplication {
     fn drop(&mut self) {
         unsafe{
+            self.logical_device.destroy_pipeline_layout(self.pipeline_layout, None);
+
+            self.logical_device.destroy_render_pass(self.render_pass, None);
+
             for imageview in self.swapchain_imageviews.iter() {
                 self.logical_device.destroy_image_view(*imageview, None);
             }
