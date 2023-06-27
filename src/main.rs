@@ -52,7 +52,8 @@ struct VulkanApplication {
     swapchain_imageviews: Vec<vk::ImageView>,
 
     render_pass: vk::RenderPass,
-    pipeline_layout: vk::PipelineLayout
+    pipeline_layout: vk::PipelineLayout,
+    graphics_pipeline: vk::Pipeline
 }
 
 impl VulkanApplication {
@@ -76,7 +77,7 @@ impl VulkanApplication {
         let swapchain_imageviews = VulkanApplication::create_swapchain_imageviews(&logical_device, &swapchain_stuff.swapchain_images, swapchain_stuff.swapchain_format);
 
         let render_pass = VulkanApplication::create_render_pass(&logical_device, swapchain_stuff.swapchain_format);
-        let pipeline_layout = VulkanApplication::create_pipeline(&logical_device, swapchain_stuff.swapchain_extent);
+        let (pipeline_layout, graphics_pipeline) = VulkanApplication::create_pipeline(&logical_device, render_pass, swapchain_stuff.swapchain_extent);
 
         VulkanApplication {
             entry,
@@ -96,7 +97,8 @@ impl VulkanApplication {
             swapchain_extent: swapchain_stuff.swapchain_extent,
             swapchain_imageviews,
             render_pass,
-            pipeline_layout
+            pipeline_layout,
+            graphics_pipeline
         }
     }
 
@@ -631,7 +633,7 @@ impl VulkanApplication {
         }
     }
 
-    fn create_pipeline(device: &Device, swapchain_extent: vk::Extent2D) -> vk::PipelineLayout {
+    fn create_pipeline(device: &Device, render_pass: vk::RenderPass, swapchain_extent: vk::Extent2D) -> (vk::PipelineLayout, vk::Pipeline) {
         let vert_shader_code = VulkanApplication::read_shader_code(Path::new("shaders/spv/vert.spv"));
         let frag_shader_code = VulkanApplication::read_shader_code(Path::new("shaders/spv/frag.spv"));
         let vert_shader_module = VulkanApplication::create_shader_module(device, vert_shader_code);
@@ -731,6 +733,31 @@ impl VulkanApplication {
             alpha_to_one_enable: vk::FALSE
         };
 
+        let stencil_state = vk::StencilOpState {
+            fail_op: vk::StencilOp::KEEP,
+            pass_op: vk::StencilOp::KEEP,
+            depth_fail_op: vk::StencilOp::KEEP,
+            compare_op: vk::CompareOp::ALWAYS,
+            compare_mask: 0,
+            write_mask: 0,
+            reference: 0
+        };
+
+        let depth_state_create_info = vk::PipelineDepthStencilStateCreateInfo {
+            s_type: vk::StructureType:: PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::PipelineDepthStencilStateCreateFlags::empty(),
+            depth_test_enable: vk::FALSE,
+            depth_write_enable: vk::FALSE,
+            depth_compare_op: vk::CompareOp::LESS_OR_EQUAL,
+            depth_bounds_test_enable: vk::FALSE,
+            stencil_test_enable: vk::FALSE,
+            front: stencil_state,
+            back: stencil_state,
+            min_depth_bounds: 0.0,
+            max_depth_bounds: 1.0
+        };
+
         let color_blend_attachment_state = [vk::PipelineColorBlendAttachmentState {
             blend_enable: vk::FALSE,
             color_write_mask: vk::ColorComponentFlags::RGBA,
@@ -768,7 +795,35 @@ impl VulkanApplication {
         let pipeline_layout = unsafe {
             device
                 .create_pipeline_layout(&pipeline_layout_create_info, None)
-                .expect("Failed to create pipeline layout!")
+                .expect("Failed to create Pipeline Layout!")
+        };
+
+        let graphics_pipeline_create_info = [vk::GraphicsPipelineCreateInfo {
+            s_type: vk::StructureType::GRAPHICS_PIPELINE_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::PipelineCreateFlags::empty(),
+            stage_count: shader_stages_create_info.len() as u32,
+            p_stages: shader_stages_create_info.as_ptr(),
+            p_vertex_input_state: &vertex_input_state_create_info,
+            p_input_assembly_state: &vertex_input_assembly_state_create_info,
+            p_tessellation_state: ptr::null(),
+            p_viewport_state: &viewport_state_create_info,
+            p_rasterization_state: &rasterization_state_create_info,
+            p_multisample_state: &multisample_state_create_info,
+            p_depth_stencil_state: &depth_state_create_info,
+            p_color_blend_state: &color_blend_state_create_info,
+            p_dynamic_state: ptr::null(),
+            layout: pipeline_layout,
+            render_pass,
+            subpass: 0,
+            base_pipeline_handle: vk::Pipeline::null(),
+            base_pipeline_index: -1,
+        }];
+
+        let graphics_pipeline = unsafe {
+            device
+                .create_graphics_pipelines(vk::PipelineCache::null(), &graphics_pipeline_create_info, None)
+                .expect("Failed to create Graphics Pipeline!")
         };
 
         unsafe {
@@ -776,7 +831,7 @@ impl VulkanApplication {
             device.destroy_shader_module(frag_shader_module, None);
         }
 
-        pipeline_layout
+        (pipeline_layout, graphics_pipeline[0])
     }
 
     fn create_shader_module(device: &Device, code: Vec<u8>) -> vk::ShaderModule {
@@ -851,6 +906,8 @@ impl VulkanApplication {
 impl Drop for VulkanApplication {
     fn drop(&mut self) {
         unsafe{
+            self.logical_device.destroy_pipeline(self.graphics_pipeline, None);;
+
             self.logical_device.destroy_pipeline_layout(self.pipeline_layout, None);
 
             self.logical_device.destroy_render_pass(self.render_pass, None);
