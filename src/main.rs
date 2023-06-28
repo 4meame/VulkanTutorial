@@ -53,7 +53,9 @@ struct VulkanApplication {
 
     render_pass: vk::RenderPass,
     pipeline_layout: vk::PipelineLayout,
-    graphics_pipeline: vk::Pipeline
+    graphics_pipeline: vk::Pipeline,
+
+    framebuffers: Vec<vk::Framebuffer>
 }
 
 impl VulkanApplication {
@@ -79,6 +81,8 @@ impl VulkanApplication {
         let render_pass = VulkanApplication::create_render_pass(&logical_device, swapchain_stuff.swapchain_format);
         let (pipeline_layout, graphics_pipeline) = VulkanApplication::create_pipeline(&logical_device, render_pass, swapchain_stuff.swapchain_extent);
 
+        let framebuffers = VulkanApplication::create_framebuffers(&logical_device, swapchain_stuff.swapchain_extent, &swapchain_imageviews, render_pass);
+
         VulkanApplication {
             entry,
             instance,
@@ -98,7 +102,8 @@ impl VulkanApplication {
             swapchain_imageviews,
             render_pass,
             pipeline_layout,
-            graphics_pipeline
+            graphics_pipeline,
+            framebuffers
         }
     }
 
@@ -834,6 +839,31 @@ impl VulkanApplication {
         (pipeline_layout, graphics_pipeline[0])
     }
 
+    fn create_framebuffers(device: &Device, swapchain_extent: vk::Extent2D, image_views: &Vec<vk::ImageView>, render_pass: vk::RenderPass) -> Vec<vk::Framebuffer> {
+        let mut framebuffers = vec![];
+        for image_view in image_views.iter() {
+            let attachments = [*image_view];
+            let framebuffer_create_info = vk::FramebufferCreateInfo {
+                s_type: vk::StructureType::FRAMEBUFFER_CREATE_INFO,
+                p_next: ptr::null(),
+                flags: vk::FramebufferCreateFlags::empty(),
+                render_pass,
+                attachment_count: attachments.len() as u32,
+                p_attachments: attachments.as_ptr(),
+                width: swapchain_extent.width,
+                height: swapchain_extent.height,
+                layers: 1
+            };
+            let framebuffer = unsafe {
+                device
+                    .create_framebuffer(&framebuffer_create_info, None)
+                    .expect("Failed to create Framebuffer!")
+            };
+            framebuffers.push(framebuffer);
+        }
+        framebuffers
+    }
+
     fn create_shader_module(device: &Device, code: Vec<u8>) -> vk::ShaderModule {
         let shader_module_create_info = vk::ShaderModuleCreateInfo {
             s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
@@ -906,6 +936,10 @@ impl VulkanApplication {
 impl Drop for VulkanApplication {
     fn drop(&mut self) {
         unsafe{
+            for framebuffer in self.framebuffers.iter() {
+                self.logical_device.destroy_framebuffer(*framebuffer, None);
+            };
+
             self.logical_device.destroy_pipeline(self.graphics_pipeline, None);;
 
             self.logical_device.destroy_pipeline_layout(self.pipeline_layout, None);
