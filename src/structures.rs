@@ -1,6 +1,6 @@
 use std::mem::size_of;
 use ash::vk;
-
+use cgmath::Matrix4;
 
 pub struct QueueFamilyIndices {
     pub graphics_family: Option<u32>,
@@ -79,7 +79,7 @@ impl Vertex {
             format: vk::Format::R32G32_SFLOAT,
             offset: 0
             };
-            
+
         let color = vk::VertexInputAttributeDescription {
             binding: 0,
             location: 1,
@@ -89,4 +89,12 @@ impl Vertex {
 
         [pos, color]
     }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone, Debug)]
+pub struct UniformBufferObject {
+    pub model: Matrix4<f32>,
+    pub view: Matrix4<f32>, 
+    pub proj: Matrix4<f32>
 }
