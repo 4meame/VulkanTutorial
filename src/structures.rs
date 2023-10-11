@@ -1,6 +1,7 @@
 use std::mem::size_of;
 use ash::vk;
 use cgmath::Matrix4;
+use memoffset::offset_of;
 
 pub struct QueueFamilyIndices {
     pub graphics_family: Option<u32>,
@@ -52,15 +53,17 @@ pub struct SyncObjects {
 #[repr(C)]
 #[derive(Clone, Debug)]
 pub struct Vertex {
-    pub pos: [f32; 2],
-    pub color: [f32; 3]
+    pub pos: [f32; 3],
+    pub color: [f32; 3],
+    pub texcoord: [f32; 2],
 }
 
 impl Vertex {
-    pub fn new(pos: [f32; 2], color: [f32; 3]) -> Self {
+    pub fn new(pos: [f32; 3], color: [f32; 3], texcoord: [f32; 2]) -> Self {
         Vertex { 
             pos, 
-            color
+            color,
+            texcoord
         }
     }
 
@@ -72,22 +75,29 @@ impl Vertex {
         }]
     }
 
-    pub fn get_attribute_description() -> [vk::VertexInputAttributeDescription; 2] {
+    pub fn get_attribute_description() -> [vk::VertexInputAttributeDescription; 3] {
         let pos = vk::VertexInputAttributeDescription {
             binding: 0,
             location: 0,
             format: vk::Format::R32G32_SFLOAT,
-            offset: 0
+            offset: offset_of!(Self, pos) as u32
             };
 
         let color = vk::VertexInputAttributeDescription {
             binding: 0,
             location: 1,
             format: vk::Format::R32G32B32_SFLOAT,
-            offset: size_of::<[f32; 2]>() as u32
+            offset: offset_of!(Self, color) as u32
             };
 
-        [pos, color]
+        let texcoord = vk::VertexInputAttributeDescription {
+            binding: 0,
+            location: 2,
+            format: vk::Format::R32G32_SFLOAT,
+            offset: offset_of!(Self, texcoord) as u32
+            };
+
+        [pos, color, texcoord]
     }
 }
 

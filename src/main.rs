@@ -34,20 +34,24 @@ const MAX_FRAMES_IN_FLIGHTS: usize = 2;
 
 const VERTICES_DATA: [Vertex; 4] = [
     Vertex {
-        pos: [-0.5, -0.5],
+        pos: [-0.5, -0.5, 0.0],
         color: [1.0, 0.0, 0.0],
+        texcoord: [0.0, 0.0]
     },
     Vertex {
-        pos: [0.5, -0.5],
+        pos: [0.5, -0.5, 0.0],
         color: [0.0, 1.0, 0.0],
+        texcoord: [1.0, 0.0]
     },
     Vertex {
-        pos: [0.5, 0.5],
+        pos: [0.5, 0.5, 0.0],
         color: [0.0, 0.0, 1.0],
+        texcoord: [1.0, 1.0]
     },
     Vertex {
-        pos: [-0.5, 0.5],
+        pos: [-0.5, 0.5, 0.0],
         color: [1.0, 1.0, 1.0],
+        texcoord: [0.0, 1.0]
     }
 ];
 
@@ -153,7 +157,7 @@ impl VulkanApplication {
         let (uniform_buffers, uniform_buffers_memory) = VulkanApplication::create_uniform_buffer(&logical_device, device_memory_properties, swapchain_stuff.swapchain_images.len());
         
         let descriptor_pool = VulkanApplication::create_descriptor_pool(&logical_device, swapchain_stuff.swapchain_images.len());
-        let descriptor_sets = VulkanApplication::create_descriptor_sets(&logical_device, swapchain_stuff.swapchain_images.len(), ubo_layout, descriptor_pool, &uniform_buffers);
+        let descriptor_sets = VulkanApplication::create_descriptor_sets(&logical_device, swapchain_stuff.swapchain_images.len(), ubo_layout, descriptor_pool, &uniform_buffers, texture_sampler, texture_imageview);
         
         let command_buffers = VulkanApplication::create_command_buffers(&logical_device, command_pool, graphics_pipeline, &framebuffers, render_pass, swapchain_stuff.swapchain_extent, vertex_buffer, index_buffer, pipeline_layout, &descriptor_sets);
 
@@ -653,7 +657,7 @@ impl VulkanApplication {
         (self.uniform_buffers, self.uniform_buffers_memory) = VulkanApplication::create_uniform_buffer(&self.logical_device, device_memory_properties, self.swapchain_images.len());
 
         self.descriptor_pool = VulkanApplication::create_descriptor_pool(&self.logical_device, self.swapchain_images.len());
-        self.descriptor_sets = VulkanApplication::create_descriptor_sets(&self.logical_device, self.swapchain_images.len(), self.ubo_layout, self.descriptor_pool, &self.uniform_buffers);
+        self.descriptor_sets = VulkanApplication::create_descriptor_sets(&self.logical_device, self.swapchain_images.len(), self.ubo_layout, self.descriptor_pool, &self.uniform_buffers, self.texture_sampler, self.texture_imageview);
 
         self.command_buffers = VulkanApplication::create_command_buffers(&self.logical_device, self.command_pool, self.graphics_pipeline, &self.framebuffers, self.render_pass, self.swapchain_extent, self.vertex_buffer, self.index_buffer, self.pipeline_layout, &self.descriptor_sets);
     }
@@ -839,36 +843,51 @@ impl VulkanApplication {
     }
 
     fn create_descriptor_set_layout(device: &Device) -> vk::DescriptorSetLayout {
-        let ubo_layout_bindings = [
-            vk::DescriptorSetLayoutBinding {
-                binding: 0,
-                descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
-                descriptor_count: 1,
-                stage_flags: vk::ShaderStageFlags::VERTEX,
-                p_immutable_samplers: ptr::null()
-            }
-        ];
+        let ubo_binding = vk::DescriptorSetLayoutBinding {
+            binding: 0,
+            descriptor_type: vk::DescriptorType::UNIFORM_BUFFER,
+            descriptor_count: 1,
+            stage_flags: vk::ShaderStageFlags::VERTEX,
+            p_immutable_samplers: ptr::null()
+        };
 
-        let ubo_layout_create_info = vk::DescriptorSetLayoutCreateInfo {
+        let sampler_binding = vk::DescriptorSetLayoutBinding {
+            binding: 1,
+            descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            descriptor_count: 1,
+            stage_flags: vk::ShaderStageFlags::FRAGMENT,
+            p_immutable_samplers: ptr::null()
+        };
+
+        let descriptor_set_layout_binds = [ubo_binding, sampler_binding];
+
+        let descriptor_set_layout_create_info = vk::DescriptorSetLayoutCreateInfo {
             s_type: vk::StructureType::DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
             p_next: ptr::null(),
             flags: vk::DescriptorSetLayoutCreateFlags::empty(),
-            p_bindings: ubo_layout_bindings.as_ptr(),
-            binding_count: ubo_layout_bindings.len() as u32
+            p_bindings: descriptor_set_layout_binds.as_ptr(),
+            binding_count: descriptor_set_layout_binds.len() as u32
         };
 
         unsafe {
             device
-                .create_descriptor_set_layout(&ubo_layout_create_info, None)
+                .create_descriptor_set_layout(&descriptor_set_layout_create_info, None)
                 .expect("Failed to create Descriptor Set Layout!")
         }
     }
 
     fn create_descriptor_pool(device: &Device, swapchain_images_count: usize) -> vk::DescriptorPool {
-        let pool_size = [vk::DescriptorPoolSize {
+        let ubo_size = vk:: DescriptorPoolSize {
             ty: vk::DescriptorType::UNIFORM_BUFFER,
             descriptor_count: swapchain_images_count as u32
-        }];
+        };
+        
+        let sampler_size = vk:: DescriptorPoolSize {
+            ty: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+            descriptor_count: swapchain_images_count as u32
+        };
+
+        let pool_size = [ubo_size, sampler_size];
 
         let descriptor_pool_create_info = vk::DescriptorPoolCreateInfo {
             s_type: vk::StructureType::DESCRIPTOR_POOL_CREATE_INFO,
@@ -886,7 +905,7 @@ impl VulkanApplication {
         }
     }
 
-    fn create_descriptor_sets(device: &Device, swapchain_images_count: usize, descriptor_set_layout: vk::DescriptorSetLayout, descriptor_pool: vk::DescriptorPool, uniform_buffers: &Vec<vk::Buffer>) -> Vec<vk::DescriptorSet> {
+    fn create_descriptor_sets(device: &Device, swapchain_images_count: usize, descriptor_set_layout: vk::DescriptorSetLayout, descriptor_pool: vk::DescriptorPool, uniform_buffers: &Vec<vk::Buffer>, texture_sampler:vk::Sampler, texture_imageview: vk::ImageView) -> Vec<vk::DescriptorSet> {
         let mut layouts: Vec<vk::DescriptorSetLayout> = vec![];
         for _ in 0..swapchain_images_count {
             layouts.push(descriptor_set_layout);
@@ -913,7 +932,13 @@ impl VulkanApplication {
                 range: std::mem::size_of::<UniformBufferObject>() as u64,
             }];
 
-            let descriptor_write_sets = [vk::WriteDescriptorSet {
+            let descriptor_image_infos = [vk::DescriptorImageInfo {
+                sampler: texture_sampler,
+                image_view: texture_imageview,
+                image_layout: vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL,
+            }];
+
+            let buffer_write_set = vk::WriteDescriptorSet {
                 s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
                 p_next: ptr::null(),
                 dst_set: descriptor_set,
@@ -924,7 +949,22 @@ impl VulkanApplication {
                 p_image_info: ptr::null(),
                 p_buffer_info: descriptor_buffer_info.as_ptr(),
                 p_texel_buffer_view: ptr::null()
-            }];
+            };
+
+            let sampler_write_set = vk::WriteDescriptorSet {
+                s_type: vk::StructureType::WRITE_DESCRIPTOR_SET,
+                p_next: ptr::null(),
+                dst_set: descriptor_set,
+                dst_binding: 1,
+                dst_array_element: 0,
+                descriptor_count: 1,
+                descriptor_type: vk::DescriptorType::COMBINED_IMAGE_SAMPLER,
+                p_image_info: descriptor_image_infos.as_ptr(),
+                p_buffer_info: ptr::null(),
+                p_texel_buffer_view: ptr::null()
+            };
+
+            let descriptor_write_sets = [buffer_write_set, sampler_write_set];
 
             unsafe {
                 device.update_descriptor_sets(&descriptor_write_sets, &[] as &[vk::CopyDescriptorSet]);
@@ -1490,7 +1530,7 @@ impl VulkanApplication {
         let time = self.start.elapsed().as_secs_f32();
         let model = Matrix4::from_angle_z(Deg(90.0 * time * 0.1));
         let view = Matrix4::look_at(Point3 { x: 2.0, y: 2.0, z: 2.0 }, Point3 { x: 0.0, y: 0.0, z: 0.0 }, Vector3{ x: 0.0, y: 0.0, z: 1.0 });
-        let mut proj = perspective(Deg(45.0), self.swapchain_extent.width as f32 / self.swapchain_extent.height as f32, 0.1, 10.0);
+        let mut proj = perspective(Deg(30.0), self.swapchain_extent.width as f32 / self.swapchain_extent.height as f32, 0.1, 10.0);
         proj[1][1] *= -1.0;
         let ubos = [
             UniformBufferObject {
