@@ -90,6 +90,9 @@ struct VulkanApplication {
 
     texture_image: vk::Image,
     texture_image_memory: vk::DeviceMemory,
+    texture_imageview: vk::ImageView,
+    texture_sampler: vk::Sampler,
+
     vertex_buffer: vk::Buffer,
     vertex_buffer_memory: vk::DeviceMemory,
     index_buffer: vk::Buffer,
@@ -143,6 +146,8 @@ impl VulkanApplication {
 
         let image_path = Path::new(TEXTURE_PATH);
         let (texture_image, texture_image_memory) = VulkanApplication::create_texture_image(&logical_device, graphics_queue, command_pool, device_memory_properties, image_path);
+        let texture_imageview = VulkanApplication::create_texture_imageview(&logical_device, texture_image);
+        let texture_sampler = VulkanApplication::create_texture_sampler(&logical_device);
         let (vertex_buffer, vertex_buffer_memory) = VulkanApplication::create_vertex_buffer(&logical_device, device_memory_properties, graphics_queue, command_pool);
         let (index_buffer, index_buffer_memory) = VulkanApplication::create_index_buffer(&logical_device, device_memory_properties, graphics_queue, command_pool);
         let (uniform_buffers, uniform_buffers_memory) = VulkanApplication::create_uniform_buffer(&logical_device, device_memory_properties, swapchain_stuff.swapchain_images.len());
@@ -181,6 +186,8 @@ impl VulkanApplication {
             command_pool,
             texture_image,
             texture_image_memory,
+            texture_imageview,
+            texture_sampler,
             vertex_buffer,
             vertex_buffer_memory,
             index_buffer,
@@ -446,7 +453,8 @@ impl VulkanApplication {
         };
 
         let physical_device_features = vk::PhysicalDeviceFeatures {
-            // default no feature
+            // enable anisotropy device feature
+            sampler_anisotropy: vk::TRUE,
             ..Default::default()
         };
         let required_validation_layer_raw_names: Vec<CString> = validation
@@ -724,37 +732,58 @@ impl VulkanApplication {
     }
 
     fn create_swapchain_imageviews(device: &Device, swapchain_images: &Vec<vk::Image>, swapchain_format: vk::Format) -> Vec<vk::ImageView> {
-        let mut swapchain_imageviews = vec![];
-        for swapchain_image in swapchain_images.into_iter() {
-            let imageview_create_info = vk::ImageViewCreateInfo {
-                s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
-                p_next: ptr::null(),
-                flags: vk::ImageViewCreateFlags::empty(),
-                image: *swapchain_image,
-                view_type: vk::ImageViewType::TYPE_2D,
-                format: swapchain_format,
-                components: vk::ComponentMapping {
-                    r: vk::ComponentSwizzle::IDENTITY,
-                    g: vk::ComponentSwizzle::IDENTITY,
-                    b: vk::ComponentSwizzle::IDENTITY,
-                    a: vk::ComponentSwizzle::IDENTITY,
-                },
-                subresource_range: vk::ImageSubresourceRange {
-                    aspect_mask: vk::ImageAspectFlags::COLOR,
-                    base_mip_level: 0,
-                    level_count: 1,
-                    base_array_layer: 0,
-                    layer_count: 1
-                },
-            };
-            let swapchain_imageview = unsafe {
-                device
-                    .create_image_view(&imageview_create_info, None)
-                    .expect("Failed to create Imageview!")
-            };
-            swapchain_imageviews.push(swapchain_imageview);
-        }
+        let swapchain_imageviews: Vec<vk::ImageView> = swapchain_images
+        .iter()
+        .map(|&image| {
+            VulkanApplication::create_image_view(
+                device,
+                image,
+                swapchain_format,
+                vk::ImageAspectFlags::COLOR,
+                1,
+            )
+        })
+        .collect();
         swapchain_imageviews
+    }
+
+    fn create_texture_imageview(device: &Device, texture_image: vk::Image) -> vk::ImageView {
+        VulkanApplication::create_image_view(
+            device, 
+            texture_image, 
+            vk::Format::R8G8B8A8_SRGB,
+            vk::ImageAspectFlags::COLOR,
+            1
+        )
+    }
+
+    fn create_image_view(device: &Device, image: vk::Image, format: vk::Format, aspect_flags:vk::ImageAspectFlags,mip_levels: u32) -> vk::ImageView {
+        let image_view_create_info = vk::ImageViewCreateInfo {
+            s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::ImageViewCreateFlags::empty(),
+            image,
+            view_type: vk::ImageViewType::TYPE_2D,
+            format,
+            components: vk::ComponentMapping {
+                r: vk::ComponentSwizzle::IDENTITY,
+                g: vk::ComponentSwizzle::IDENTITY,
+                b: vk::ComponentSwizzle::IDENTITY,
+                a: vk::ComponentSwizzle::IDENTITY,
+            },
+            subresource_range: vk::ImageSubresourceRange {
+                aspect_mask: aspect_flags,
+                base_mip_level: 0,
+                level_count: mip_levels,
+                base_array_layer: 0,
+                layer_count: 1
+            },
+        };
+        unsafe {
+            device
+                .create_image_view(&image_view_create_info, None)
+                .expect("Failed to create Image View!")
+        }
     }
 
     fn create_render_pass(device: &Device, swapchain_format: vk::Format) -> vk::RenderPass {
@@ -1148,6 +1177,35 @@ impl VulkanApplication {
         }
     }
 
+    fn create_texture_sampler(device: &Device) -> vk::Sampler {
+        let sampler_create_info = vk::SamplerCreateInfo {
+            s_type: vk::StructureType:: SAMPLER_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::SamplerCreateFlags::empty(),
+            mag_filter: vk::Filter::LINEAR,
+            min_filter: vk::Filter::LINEAR,
+            mipmap_mode: vk::SamplerMipmapMode::LINEAR,
+            address_mode_u: vk::SamplerAddressMode::REPEAT,
+            address_mode_v: vk::SamplerAddressMode::REPEAT,
+            address_mode_w: vk::SamplerAddressMode::REPEAT,
+            mip_lod_bias: 0.0,
+            anisotropy_enable: vk::TRUE,
+            max_anisotropy: 16.0,
+            compare_enable: vk::FALSE,
+            compare_op: vk::CompareOp::ALWAYS,
+            min_lod: 0.0,
+            max_lod: 0.0,
+            border_color: vk::BorderColor::INT_OPAQUE_BLACK,
+            unnormalized_coordinates: vk::FALSE,
+        };
+
+        unsafe {
+            device
+                .create_sampler(&sampler_create_info, None)
+                .expect("Failed to create Sampler!")
+        }
+    }
+
     fn create_texture_image(device: &Device, queue: vk::Queue, command_pool: vk::CommandPool, device_memory_properties: vk::PhysicalDeviceMemoryProperties, image_path: &Path) -> (vk::Image, vk::DeviceMemory) {
         let mut image_object = image::open(image_path).unwrap();
         image_object = image_object.flipv();
@@ -1180,7 +1238,7 @@ impl VulkanApplication {
             device.unmap_memory(staging_buffer_memory);
         }
 
-        let format = vk::Format::R8G8B8A8_UNORM;
+        let format = vk::Format::R8G8B8A8_SRGB;
         let tiling = vk::ImageTiling::OPTIMAL;
         let image_texture_usage = vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED;
         let image_texture_required_memory_properties = vk::MemoryPropertyFlags::DEVICE_LOCAL;
@@ -1913,9 +1971,11 @@ impl Drop for VulkanApplication {
             }
 
             self.destroy_swapchain();
-
             self.logical_device.destroy_descriptor_set_layout(self.ubo_layout, None);
 
+            self.logical_device.destroy_sampler(self.texture_sampler, None);
+
+            self.logical_device.destroy_image_view(self.texture_imageview, None);
             self.logical_device.destroy_image(self.texture_image, None);
             self.logical_device.free_memory(self.texture_image_memory, None);
 
