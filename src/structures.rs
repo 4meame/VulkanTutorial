@@ -79,7 +79,7 @@ impl Vertex {
         let pos = vk::VertexInputAttributeDescription {
             binding: 0,
             location: 0,
-            format: vk::Format::R32G32_SFLOAT,
+            format: vk::Format::R32G32B32_SFLOAT,
             offset: offset_of!(Self, pos) as u32
             };
 
