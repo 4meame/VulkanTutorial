@@ -10,12 +10,14 @@ use structures::{QueueFamilyIndices, SurfaceStuff, DeviceExtension, SwapchainStu
 use winit::event::{Event, VirtualKeyCode, ElementState, KeyboardInput, WindowEvent};
 use winit::event_loop::{EventLoop, ControlFlow};
 use cgmath::{Deg, Point3, Matrix4, Vector3, perspective};
+use std::cmp::max;
 use std::collections::HashSet;
 use std::os::raw::{c_char, c_void};
-use std::ffi::{CString};
+use std::ffi::CString;
 use std::path::Path;
 use std::ptr;
 use std::time::Instant;
+use std::mem::size_of;
 
 const WINDOW_TITLE: &'static str = "Vulkan Renderer By Rust";
 const WINDOW_WIDTH: u32 = 800;
@@ -123,6 +125,7 @@ struct VulkanApplication {
     texture_image_memory: vk::DeviceMemory,
     texture_imageview: vk::ImageView,
     texture_sampler: vk::Sampler,
+    texture_mip_levels: u32,
 
     vertices: Vec<Vertex>,
     indices: Vec<u32>,
@@ -181,9 +184,10 @@ impl VulkanApplication {
         let framebuffers = VulkanApplication::create_framebuffers(&logical_device, swapchain_stuff.swapchain_extent, &swapchain_imageviews, depth_imageview, render_pass);
 
         let image_path = Path::new(TEXTURE_PATH);
-        let (texture_image, texture_image_memory) = VulkanApplication::create_texture_image(&logical_device, graphics_queue, command_pool, device_memory_properties, image_path);
-        let texture_imageview = VulkanApplication::create_texture_imageview(&logical_device, texture_image);
-        let texture_sampler = VulkanApplication::create_texture_sampler(&logical_device);
+        VulkanApplication::check_mipmap_support(&instance, physical_device, vk::Format::R8G8B8A8_UNORM);
+        let (texture_image, texture_image_memory, texture_mip_levels) = VulkanApplication::create_texture_image(&logical_device, graphics_queue, command_pool, device_memory_properties, image_path);
+        let texture_imageview = VulkanApplication::create_texture_imageview(&logical_device, texture_image, texture_mip_levels);
+        let texture_sampler = VulkanApplication::create_texture_sampler(&logical_device, texture_mip_levels);
         
         let model_path = Path::new(MODEL_PATH);
         let (vertices, indices) = VulkanApplication::load_model(model_path);
@@ -231,6 +235,7 @@ impl VulkanApplication {
             texture_image_memory,
             texture_imageview,
             texture_sampler,
+            texture_mip_levels,
             vertices,
             indices,
             vertex_buffer,
@@ -799,17 +804,17 @@ impl VulkanApplication {
         swapchain_imageviews
     }
 
-    fn create_texture_imageview(device: &Device, texture_image: vk::Image) -> vk::ImageView {
+    fn create_texture_imageview(device: &Device, texture_image: vk::Image, mip_levels: u32) -> vk::ImageView {
         VulkanApplication::create_image_view(
             device, 
             texture_image, 
             vk::Format::R8G8B8A8_SRGB,
             vk::ImageAspectFlags::COLOR,
-            1
+            mip_levels
         )
     }
 
-    fn create_image_view(device: &Device, image: vk::Image, format: vk::Format, aspect_flags:vk::ImageAspectFlags,mip_levels: u32) -> vk::ImageView {
+    fn create_image_view(device: &Device, image: vk::Image, format: vk::Format, aspect_flags:vk::ImageAspectFlags, mip_levels: u32) -> vk::ImageView {
         let image_view_create_info = vk::ImageViewCreateInfo {
             s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
             p_next: ptr::null(),
@@ -848,7 +853,8 @@ impl VulkanApplication {
             vk::ImageTiling::OPTIMAL,
             vk::ImageUsageFlags::DEPTH_STENCIL_ATTACHMENT,
             memory_properties, 
-            vk::MemoryPropertyFlags::DEVICE_LOCAL
+            vk::MemoryPropertyFlags::DEVICE_LOCAL,
+            1
         );
 
         let depth_imageview = VulkanApplication::create_image_view(
@@ -865,7 +871,8 @@ impl VulkanApplication {
             depth_image, 
             depth_format, 
             vk::ImageLayout::UNDEFINED,
-            vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+            vk::ImageLayout::DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            1
         );
 
         (depth_image, depth_image_memory, depth_imageview)
@@ -1357,7 +1364,7 @@ impl VulkanApplication {
         }
     }
 
-    fn create_texture_sampler(device: &Device) -> vk::Sampler {
+    fn create_texture_sampler(device: &Device, mip_levels: u32) -> vk::Sampler {
         let sampler_create_info = vk::SamplerCreateInfo {
             s_type: vk::StructureType:: SAMPLER_CREATE_INFO,
             p_next: ptr::null(),
@@ -1374,7 +1381,7 @@ impl VulkanApplication {
             compare_enable: vk::FALSE,
             compare_op: vk::CompareOp::ALWAYS,
             min_lod: 0.0,
-            max_lod: 0.0,
+            max_lod: mip_levels as f32,
             border_color: vk::BorderColor::INT_OPAQUE_BLACK,
             unnormalized_coordinates: vk::FALSE,
         };
@@ -1386,12 +1393,19 @@ impl VulkanApplication {
         }
     }
 
-    fn create_texture_image(device: &Device, queue: vk::Queue, command_pool: vk::CommandPool, device_memory_properties: vk::PhysicalDeviceMemoryProperties, image_path: &Path) -> (vk::Image, vk::DeviceMemory) {
+    fn create_texture_image(device: &Device, queue: vk::Queue, command_pool: vk::CommandPool, device_memory_properties: vk::PhysicalDeviceMemoryProperties, image_path: &Path) -> (vk::Image, vk::DeviceMemory, u32) {
         let mut image_object = image::open(image_path).unwrap();
         image_object = image_object.flipv();
         let (image_width, image_height) = (image_object.width(), image_object.height());
         let image_size =
-            (std::mem::size_of::<u8>() as u32 * image_width * image_height * 4) as vk::DeviceSize;
+            (size_of::<u8>() as u32 * image_width * image_height * 4) as vk::DeviceSize;
+        
+        if image_size <= 0 {
+            panic!("Failed to load texture image!")
+        }
+
+        let mip_levels = ((std::cmp::max(image_width, image_height) as f32).log2().floor() as u32) + 1;
+
         let image_data = match &image_object {
             image::DynamicImage::ImageLuma8(_)
             | image::DynamicImage::ImageBgr8(_)
@@ -1400,10 +1414,6 @@ impl VulkanApplication {
             | image::DynamicImage::ImageBgra8(_)
             | image::DynamicImage::ImageRgba8(_) => image_object.raw_pixels(),
         };
-
-        if image_size <= 0 {
-            panic!("Failed to load texture image!")
-        }
 
         let staging_buffer_usage = vk::BufferUsageFlags::TRANSFER_SRC;
         let staging_buffer_memory_required_property = vk::MemoryPropertyFlags::HOST_VISIBLE | vk::MemoryPropertyFlags::HOST_COHERENT;     
@@ -1422,24 +1432,21 @@ impl VulkanApplication {
         let tiling = vk::ImageTiling::OPTIMAL;
         let image_texture_usage = vk::ImageUsageFlags::TRANSFER_DST | vk::ImageUsageFlags::SAMPLED;
         let image_texture_required_memory_properties = vk::MemoryPropertyFlags::DEVICE_LOCAL;
-        let (texture_image, texture_image_memory) = VulkanApplication::create_image(device, image_width, image_height, format, tiling, image_texture_usage, device_memory_properties, image_texture_required_memory_properties);
+        let (texture_image, texture_image_memory) = VulkanApplication::create_image(device, image_width, image_height, format, tiling, image_texture_usage, device_memory_properties, image_texture_required_memory_properties, mip_levels);
 
-        let old_layout = vk::ImageLayout::UNDEFINED;
-        let temp_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
-        let new_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
-        VulkanApplication::transition_image_layout(device, queue, command_pool, texture_image, format, old_layout, temp_layout);
+        VulkanApplication::transition_image_layout(device, queue, command_pool, texture_image, format, vk::ImageLayout::UNDEFINED, vk::ImageLayout::TRANSFER_DST_OPTIMAL, mip_levels);
         VulkanApplication::copy_buffer_to_image(device, queue, command_pool, staging_buffer, texture_image, image_width, image_height);
-        VulkanApplication::transition_image_layout(device, queue, command_pool, texture_image, format, temp_layout, new_layout);
+        VulkanApplication::generate_mipmaps(device, queue, command_pool, texture_image, image_width, image_height, mip_levels);
 
         unsafe {
             device.destroy_buffer(staging_buffer, None);
             device.free_memory(staging_buffer_memory, None);
         }
 
-        (texture_image, texture_image_memory)
+        (texture_image, texture_image_memory, mip_levels)
     }
 
-    fn transition_image_layout(device: &Device, queue: vk::Queue, command_pool: vk::CommandPool, image: vk::Image, format: vk::Format, old_layout: vk::ImageLayout, new_layout: vk::ImageLayout) {
+    fn transition_image_layout(device: &Device, queue: vk::Queue, command_pool: vk::CommandPool, image: vk::Image, format: vk::Format, old_layout: vk::ImageLayout, new_layout: vk::ImageLayout, mip_levels: u32) {
         let command_buffer = VulkanApplication::begin_single_time_command(device, command_pool);
 
         let src_access_mask;
@@ -1492,7 +1499,7 @@ impl VulkanApplication {
             subresource_range: vk::ImageSubresourceRange {
                 aspect_mask,
                 base_mip_level: 0,
-                level_count: 1,
+                level_count: mip_levels,
                 layer_count: 1,
                 base_array_layer: 0
             }
@@ -1547,7 +1554,150 @@ impl VulkanApplication {
         VulkanApplication::end_single_time_command(device, queue, command_pool, command_buffer);
     }
 
-    fn create_image(device: &Device, width: u32, height: u32, format: vk::Format, tiling: vk::ImageTiling, usage: vk::ImageUsageFlags, memory_properties: vk::PhysicalDeviceMemoryProperties, required_memory_properties: vk::MemoryPropertyFlags) -> (vk::Image, vk::DeviceMemory) {
+    fn generate_mipmaps(device: &Device, queue: vk::Queue, command_pool: vk::CommandPool, image: vk::Image, texture_width: u32, texture_height: u32, mip_levels: u32) {
+        let command_buffer = VulkanApplication::begin_single_time_command(device, command_pool);
+
+        let mut image_barrier= vk::ImageMemoryBarrier {
+            s_type: vk::StructureType::IMAGE_MEMORY_BARRIER,
+            p_next: ptr::null(),
+            src_access_mask: vk::AccessFlags::empty(),
+            dst_access_mask: vk::AccessFlags::empty(),
+            old_layout: vk::ImageLayout::UNDEFINED,
+            new_layout: vk::ImageLayout::UNDEFINED,
+            src_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            dst_queue_family_index: vk::QUEUE_FAMILY_IGNORED,
+            image,
+            subresource_range: vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            }, 
+        };
+
+        let mut mip_width = texture_width as i32;
+        let mut mip_height = texture_height as i32;
+
+        for i in 1..mip_levels {
+            image_barrier.subresource_range.base_mip_level = i - 1;
+            image_barrier.old_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
+            image_barrier.new_layout = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
+            image_barrier.src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+            image_barrier.dst_access_mask = vk::AccessFlags::TRANSFER_READ;
+
+            unsafe {
+                device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[image_barrier.clone()],
+                );
+            }
+
+            let blits = [vk::ImageBlit {
+                src_subresource: vk::ImageSubresourceLayers {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    mip_level: i - 1,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+                src_offsets: [
+                    vk::Offset3D { x: 0, y: 0, z: 0 },
+                    vk::Offset3D {
+                        x: mip_width,
+                        y: mip_height,
+                        z: 1,
+                    },
+                ],
+                dst_subresource: vk::ImageSubresourceLayers {
+                    aspect_mask: vk::ImageAspectFlags::COLOR,
+                    mip_level: i,
+                    base_array_layer: 0,
+                    layer_count: 1,
+                },
+                dst_offsets: [
+                    vk::Offset3D { x: 0, y: 0, z: 0 },
+                    vk::Offset3D {
+                        x: max(mip_width / 2, 1),
+                        y: max(mip_height / 2, 1),
+                        z: 1,
+                    },
+                ],
+            }];
+
+            unsafe {
+                device.cmd_blit_image(
+                    command_buffer,
+                    image,
+                    vk::ImageLayout::TRANSFER_SRC_OPTIMAL,
+                    image,
+                    vk::ImageLayout::TRANSFER_DST_OPTIMAL,
+                    &blits,
+                    vk::Filter::LINEAR,
+                );
+            }
+
+            image_barrier.old_layout = vk::ImageLayout::TRANSFER_SRC_OPTIMAL;
+            image_barrier.new_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+            image_barrier.src_access_mask = vk::AccessFlags::TRANSFER_READ;
+            image_barrier.dst_access_mask = vk::AccessFlags::SHADER_READ;
+
+            unsafe {
+                device.cmd_pipeline_barrier(
+                    command_buffer,
+                    vk::PipelineStageFlags::TRANSFER,
+                    vk::PipelineStageFlags::FRAGMENT_SHADER,
+                    vk::DependencyFlags::empty(),
+                    &[],
+                    &[],
+                    &[image_barrier.clone()],
+                );
+            }
+
+            mip_width = max(mip_width / 2, 1);
+            mip_height = max(mip_height / 2, 1);
+        }
+
+        image_barrier.subresource_range.base_mip_level = mip_levels - 1;
+        image_barrier.old_layout = vk::ImageLayout::TRANSFER_DST_OPTIMAL;
+        image_barrier.new_layout = vk::ImageLayout::SHADER_READ_ONLY_OPTIMAL;
+        image_barrier.src_access_mask = vk::AccessFlags::TRANSFER_WRITE;
+        image_barrier.dst_access_mask = vk::AccessFlags::SHADER_READ;
+
+        unsafe {
+            device.cmd_pipeline_barrier(
+                command_buffer,
+                vk::PipelineStageFlags::TRANSFER,
+                vk::PipelineStageFlags::FRAGMENT_SHADER,
+                vk::DependencyFlags::empty(),
+                &[],
+                &[],
+                &[image_barrier.clone()],
+            );
+        }
+
+        VulkanApplication::end_single_time_command(device, queue, command_pool, command_buffer);
+    }
+
+    fn check_mipmap_support(instance: &ash::Instance, physical_device: vk::PhysicalDevice, image_format: vk::Format) {
+        let format_properties = unsafe {
+            instance.get_physical_device_format_properties(physical_device, image_format)
+        };
+
+        let is_sample_image_filter_linear_support = format_properties
+            .optimal_tiling_features
+            .contains(vk::FormatFeatureFlags::SAMPLED_IMAGE_FILTER_LINEAR);
+
+        if is_sample_image_filter_linear_support == false {
+            panic!("Texture Image format does not support linear blitting!")
+        }
+    }
+
+    fn create_image(device: &Device, width: u32, height: u32, format: vk::Format, tiling: vk::ImageTiling, usage: vk::ImageUsageFlags, memory_properties: vk::PhysicalDeviceMemoryProperties, required_memory_properties: vk::MemoryPropertyFlags, mip_levels: u32) -> (vk::Image, vk::DeviceMemory) {
         let image_create_info = vk::ImageCreateInfo {
             s_type: vk::StructureType::IMAGE_CREATE_INFO,
             p_next: ptr::null(),
@@ -1559,7 +1709,7 @@ impl VulkanApplication {
                 height,
                 depth: 1
             },
-            mip_levels: 1,
+            mip_levels,
             array_layers: 1,
             samples: vk::SampleCountFlags::TYPE_1,
             tiling,
